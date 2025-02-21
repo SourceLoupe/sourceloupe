@@ -27,7 +27,7 @@ export class ExampleValidateOverrideRule extends ScanRule {
     validateNode(node: SyntaxNode): ScanResult[] {
         const resultList: ScanResult[] = [];
         if (node.text.length < 4) {
-            resultList.push(new ScanResult(this, ResultType.VIOLATION, []));
+            resultList.push(new ScanResult(this, ResultType.VIOLATION));
         }
 
         return resultList;

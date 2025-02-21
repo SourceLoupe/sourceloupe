@@ -1,4 +1,4 @@
-import type { Language } from 'tree-sitter';
+import type { Language, QueryMatch } from 'tree-sitter';
 import Parser, * as TreeSitter from 'tree-sitter';
 import { QueryCapture, SyntaxNode } from 'tree-sitter';
 import { ResultType, ScanResult, ScanRule } from 'sourceloupe-types';
@@ -70,6 +70,8 @@ export default class ScanManager {
      * Common scan method used by both scan and measure. Both were consolidated here as both essentially
      * did the same thing, just reported the results differently. Realizing that how the report is formatted
      * should be the purview of something other than the scanner, I moved that stuff out.
+     * Consolidated all rule methods into validateQuery. Only that and preFilter remain, and their usefulness should
+     * be evident.
      * @returns `Map<string, Array<ScanResult>>` A map of category->array of violations. Allows for some
      * custom organization
      */
@@ -78,38 +80,26 @@ export default class ScanManager {
 
         const scanResultList: ScanResult[] = [];
 
-        for (const rule of contextRules) {
+        for (const ruleIteration of contextRules) {
             // This next line normalizes the priority to the highest level of severity in case someone tries to
             // execute a rule with a priority of 16452 or something. That priority wouldn't be mappable to
             // sarif severity levels.
-            rule.Priority = rule.Priority > ResultType.VIOLATION ? ResultType.VIOLATION : rule.Priority;
-            const queryText = `${rule.Query}${rule.RegEx ? `(#match? @exp "${rule.RegEx}")` : ''}`;
+            ruleIteration.Priority = ruleIteration.Priority > ResultType.VIOLATION ? ResultType.VIOLATION : ruleIteration.Priority;
+            const queryText = ruleIteration.Query;
 
             try {
-                const filteredRoot: SyntaxNode = rule.preFilter(this.treeSitterNodeTree.rootNode);
+                const filteredRoot: SyntaxNode = ruleIteration.preFilter(this.treeSitterNodeTree.rootNode);
                 // Prettier reformats this into a blatant syntax error
-                const captures: QueryCapture[] = new TreeSitter.Query(this.treeSitterLanguage, queryText).captures(
-                    filteredRoot
-                );
-                // Just the nodes for the following function overrides
-                const capturedNodes: SyntaxNode[] = captures.map((captureInstance) => {
-                    return captureInstance.node;
+                const captureQuery: TreeSitter.Query = new TreeSitter.Query(this.treeSitterLanguage, queryText)
+                const ruleContext = ruleIteration.Context ?? 'scan';
+                ruleIteration.validateQuery(captureQuery, filteredRoot).forEach((capturedNode) => {
+                    scanResultList.push(new ScanResult(
+                        ruleIteration, 
+                        ruleIteration.ResultType, 
+                        capturedNode as Parser.SyntaxNode));
                 });
 
-                // Default to scan
-                const ruleContext = rule.Context ?? 'scan';
-
-                if (ruleContext.includes('measure')) {
-                    rule.measureNodes(capturedNodes);
-                }
-
-                scanResultList.push(...rule.validateNodes(capturedNodes));
-
-                capturedNodes.forEach((node) => {
-                    scanResultList.push(...rule.validateNode(node));
-                });
             } catch (treeSitterError: unknown) {
-                // TODO: Logging
                 console.error(`A tree-sitter query error occurred: ${treeSitterError}`);
             }
         }
